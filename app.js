@@ -141,6 +141,12 @@ app.get('/status', async (req, res) => {
     });
 });
 
+app.get('/sesiones', async (req, res) => {
+  // Solo obtener sesiones que no hayan sido finalizadas (endedAt: null)
+  const sessions = await Session.find({ endedAt: null });
+  res.status(200).json(sessions);
+});
+
 app.delete('/delete-all-sessions', async (req, res) => {
     await Session.deleteMany({});
     res.json({ message: "Todas las sesiones han sido eliminadas" });
