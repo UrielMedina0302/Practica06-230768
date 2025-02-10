@@ -4,17 +4,36 @@ import { v4 as uuidv4 } from "uuid";
 import os from "os";
 import moment from "moment-timezone";
 import mongoose from "mongoose";
+import crypto from "crypto";
 
 const app = express();
 const PORT = 3100;
 const MONGO_URL = "mongodb+srv://valienteua17:METU050302@cluster230768.uubu1.mongodb.net/SesionesBD?retryWrites=true&w=majority&appName=Cluster230768";
 
 // Conectar a MongoDB
-mongoose.connect(MONGO_URL, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-}).then(() => console.log("Conectado a MongoDB"))
+mongoose.connect(MONGO_URL).then(() => console.log("Conectado a MongoDB"))
   .catch(err => console.error("Error al conectar a MongoDB:", err));
+
+// Clave y IV para encriptación
+const encryptionKey = crypto.randomBytes(32);
+const iv = crypto.randomBytes(16);
+
+// Función para encriptar datos sensibles
+const encrypt = (text) => {
+    const cipher = crypto.createCipheriv('aes-256-cbc', encryptionKey, iv);
+    let encrypted = cipher.update(text, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return `${iv.toString('hex')}:${encrypted}`;
+};
+
+// Función para desencriptar datos
+const decrypt = (encryptedText) => {
+    const [ivHex, encryptedData] = encryptedText.split(":");
+    const decipher = crypto.createDecipheriv('aes-256-cbc', encryptionKey, Buffer.from(ivHex, 'hex'));
+    let decrypted = decipher.update(encryptedData, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+};
 
 // Definir esquema de sesión
 const sessionSchema = new mongoose.Schema({
@@ -68,10 +87,10 @@ app.post('/login', async (req, res) => {
     const now = new Date();
     const newSession = new Session({
         sessionID,
-        email,
+        email: encrypt(email),
         nickname,
-        macAddress,
-        ip: getLocalIP(),
+        macAddress: encrypt(macAddress),
+        ip: encrypt(getLocalIP() || ""),
         createdAt: now,
         lastAccessed: now
     });
@@ -117,14 +136,24 @@ app.get('/status', async (req, res) => {
         inicio: createdAt_MX,
         ultimoAcceso: lastAccessed_MX,
         antiguedad: `${hours} horas, ${minutes} minutos y ${seconds} segundos`,
-        finalizadaPor: session.endedBy || "activa"
+        finalizadaPor: session.endedBy || "activa",
+        estado: session.endedAt ? "inactiva" : "activa"
     });
 });
 
-app.get("/sesiones", async (req, res) => {
-    const sessions = await Session.find();
-    if (sessions.length === 0) {
-        return res.status(200).json({ message: "No hay sesiones activas", count: 0, sessions: [] });
-    }
-    res.status(200).json({ message: "Sesiones activas encontradas", count: sessions.length, sessions });
+app.delete('/delete-all-sessions', async (req, res) => {
+    await Session.deleteMany({});
+    res.json({ message: "Todas las sesiones han sido eliminadas" });
 });
+
+// Middleware para finalizar sesiones expiradas
+setInterval(async () => {
+    const expiredSessions = await Session.find({ endedAt: null });
+    const now = new Date();
+    for (const session of expiredSessions) {
+        if (now - session.lastAccessed > 2 * 60 * 1000) { // 2 minutos
+            await Session.findOneAndUpdate({ sessionID: session.sessionID }, { endedAt: now, endedBy: "sistema" });
+            console.log(`Sesión ${session.sessionID} finalizada por el sistema`);
+        }
+    }
+}, 60 * 1000); // Verifica cada minuto
