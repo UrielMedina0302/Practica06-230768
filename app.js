@@ -272,6 +272,11 @@ app.get('/sesiones', async (req, res) => {
     res.status(200).json(sessionData);
 });
 
+app.delete('/deletesessions', async (req, res) => {
+    await Session.deleteMany({});
+    res.json({ message: "Todas las sesiones han sido eliminadas" });
+});
+
 setInterval(async () => {
     const expiredSessions = await Session.find({ activo: true });
     const now = moment().tz('America/Mexico_City').toDate();
